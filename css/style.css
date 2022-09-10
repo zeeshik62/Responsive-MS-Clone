@@ -1,0 +1,6 @@
+.navbar-nav .dropdown .dropdown-menu{
+    width: 1300px;
+}
+.nav-item .dropdown{
+display: flex;
+}
