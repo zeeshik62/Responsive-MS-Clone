@@ -1,0 +1,139 @@
+FOR MORGAN 
+
+/**
+ * @author Shoaib Akhtar <ssakhtar@yopmail.com>
+ * @link  Author Website
+ * @since 2022-10-10
+ */
+
+"use strict";
+/**
+ * Dependencies of This Application
+ */
+
+const express = require("express"),
+  fs = require("fs"),
+  bodyParser = require("body-parser"),
+  routes = require("./routes"),
+  colors = require("colors"),
+  morgan = require("morgan"),
+  mongooseInit = require("./data_access/db_orm/index");
+const cors = require("cors");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const rfs = require("rotating-file-stream");
+const { logger } = require("./utils/winston")
+
+
+const corsOptions = {
+  origin: "*",
+  methods: "GET,POST, PATCH, PUT, DELETE",
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+let server = express(),
+  create,
+  start;
+  
+// const logStream = rfs.createStream("error.log", {
+//   interval: "1d",
+//   path: "logs",
+// });
+create = function () {
+  server.use(bodyParser.urlencoded({ extended: false }));
+
+  server.use((req, res, next) => {
+    if (req.originalUrl === "/stripe/webhook") {
+      next();
+    } else {
+      bodyParser.json()(req, res, next);
+      express.json(req, res, next);
+    }
+  });
+
+  server.use(express.urlencoded({ extended: false }));
+
+  server.use(express.static("public"));
+  server.use(cors(corsOptions));
+
+  server.use((req, res, next) => {
+    const startTime = Date.now();
+  
+    res.on("finish", () => {
+      const responseTime = Date.now() - startTime;
+
+      if (res.statusCode >= 400) {
+        const logDetails = {
+          message: "Request Error",
+          method: req.method,
+          url: req.originalUrl,
+          status: res.statusCode,
+          responseTime: `${responseTime} ms`,
+          headers: req.headers,
+          body: req.body,
+        };
+
+        if (res.locals.error) {       
+             logger.error({
+            message: logDetails.message,
+            error: res.locals.error.message,
+            stack: res.locals.error.stack, 
+            details: logDetails,
+          });
+        } else {
+          logger.error(logDetails);
+        }
+      }
+    });
+  
+    next();
+  });
+
+  server.use(morgan("dev"));
+
+  // server.use(
+  //   morgan((tokens, req, res) => {
+  //     return [
+  //       `Method: ${tokens.method(req, res)}`,
+  //       `URL: ${tokens.url(req, res)}`,
+  //       `Status: ${tokens.status(req, res)}`,
+  //       `Response Time: ${tokens['response-time'](req, res)} ms`,
+  //       `Headers: ${JSON.stringify(req.headers)}`,
+  //       `Body: ${JSON.stringify(req.body)}`,
+  //     ].join(" | ");
+  //   }, {
+  //     skip: (req, res) => res.statusCode < 400, 
+  //     stream: logStream,
+  //   })
+  // );
+
+  routes.init(server);
+  server.use((err, req, res, next) => {
+    res.locals.error = err;
+    res.status(err.status || 500).json({ error: err.message });
+    logger.error({
+      message: "Unhandled error",
+      error: err.message,
+      stack: err.stack,
+    });
+  });
+  mongooseInit.initMongooseConnection().then((connected) => {
+    if (connected) {
+      console.log(colors.green("Mongoose: connection to mongodb successful ✓"));
+    } else {
+      console.log(colors.red("Mongoose connection was unsuccessful"));
+    }
+  });
+};
+
+start = function () {
+  server.listen(process.env.PORT, function () {
+    console.log(
+      colors.green(`Starting ${process.env.DOMAIN_NAME} Backend Server at: ${process.env.HOST}:${process.env.PORT}`)
+    );
+  });
+};
+
+module.exports = {
+  create,
+  start,
+};
